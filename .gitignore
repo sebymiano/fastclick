@@ -30,3 +30,4 @@ stamp-h
 cscope.*
 **/.nfs*
 compile_commands.json
+.vscode/*

@@ -84,24 +84,29 @@ STD_ELEMENT_OBJS = addressinfo.o alignmentinfo.o \
 	errorelement.o portinfo.o scheduleinfo.o
 OBJS = $(ELEMENT_OBJS) $(ELEMENTSCONF).o click.o
 
+LLVM_CFLAGS = $(shell llvm-config --cflags) -std=c++14
+LLVM_LIBS = $(shell llvm-config --libs core orcjit native)
+LLVM_SYS_LIBS = $(shell llvm-config --system-libs)
+LLVM_LDFLAGS = $(shell llvm-config --ldflags) -lLLVMSupport
+
 CPPFLAGS = @CPPFLAGS@ -DCLICK_USERLEVEL
 CFLAGS = @CFLAGS@
-CXXFLAGS = @CXXFLAGS@
+CXXFLAGS = @CXXFLAGS@ $(LLVM_CFLAGS)
 
 DEFS = @DEFS@
 INCLUDES = -I$(top_builddir)/include -I$(top_builddir)/vendor -I$(top_srcdir)/include \
 	-I$(srcdir) -I$(top_srcdir) \
 	@PROPER_INCLUDES@ @PCAP_INCLUDES@ @DPDK_INCLUDES@ @NETMAP_INCLUDES@ @NUMA_INCLUDES@
-LDFLAGS = @LDFLAGS@
-LIBS = @LIBS@ `$(CLICK_BUILDTOOL) --otherlibs` $(ELEMENT_LIBS)
+LDFLAGS = @LDFLAGS@ $(LLVM_LDFLAGS)
+LIBS = @LIBS@ `$(CLICK_BUILDTOOL) --otherlibs` $(ELEMENT_LIBS) $(LLVM_LIBS) $(LLVM_SYS_LIBS)
 DL_LDFLAGS = @DL_LDFLAGS@
 
 CXXCOMPILE = $(CXX) $(DEFS) $(INCLUDES) $(CPPFLAGS) $(CXXFLAGS)
 CXXLD = $(CXX)
 CXXLINK = $(CXXLD) $(CXXFLAGS) $(LDFLAGS) -o $@
-COMPILE = $(CC) $(DEFS) $(INCLUDES) $(CPPFLAGS) $(CFLAGS)
+COMPILE = $(CC) $(DEFS) $(INCLUDES) $(CPPFLAGS) $(CFLAGS) $(LLVM_CFLAGS)
 CCLD = $(CC)
-LINK = $(CCLD) $(CFLAGS) $(LDFLAGS) -o $@
+LINK = $(CCLD) $(CFLAGS) $(LDFLAGS) $(LLVM_LIBS) $(LLVM_SYS_LIBS) $(LLVM_LDFLAGS) -o $@
 
 USE_DPDK = @USE_DPDK@
 ifeq ($(USE_DPDK),yes)
