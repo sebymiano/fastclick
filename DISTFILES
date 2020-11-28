@@ -381,6 +381,7 @@ test.click
 ./include:
 click
 clicknet
+morphy
 
 ./include/click:
 algorithm.hh
@@ -488,6 +489,9 @@ tcp.h
 udp.h
 wifi.h
 
+./include/morphy:
+KaleidoscopeJIT.hh
+
 ./lib:
 archive.cc
 args.cc
@@ -524,6 +528,7 @@ nameinfo.cc
 notifier.cc
 packet.cc
 router.cc
+KaleidoscopeJIT.cc
 routerthread.cc
 routervisitor.cc
 selectset.cc

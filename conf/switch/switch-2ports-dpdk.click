@@ -8,8 +8,8 @@
 
 
 //Define the name of the ports
-define( $dev1  0,
-        $dev2  1,
+define( $dev1  0000:89:00.0,
+        $dev2  0000:89:00.1,
         $print false)
 
 s :: EtherSwitch;

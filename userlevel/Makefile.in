@@ -39,7 +39,9 @@ x_verbose_cmd = $(1) $(3)
 verbose_cmd = $(1) $(3)
 else
 ccompile = @/bin/echo ' ' $(2) $< && $(COMPILE) $(DEPCFLAGS) $(1)
+ccompile_bc = @/bin/echo ' ' $(2) $< && $(COMPILE) $(DEPCFLAGS) $(1) && $(COMPILE) $(DEPCFLAGS) $(3)
 ccompile_nodep = @/bin/echo ' ' $(2) $< && $(COMPILE) $(1)
+cxxcompile_bc = @/bin/echo ' ' $(2) $< && $(CXXCOMPILE) $(DEPCFLAGS) $(1) && $(CXXCOMPILE) $(DEPCFLAGS) $(3)
 cxxcompile = @/bin/echo ' ' $(2) $< && $(CXXCOMPILE) $(DEPCFLAGS) $(1)
 cxxcompile_nodep = @/bin/echo ' ' $(2) $< && $(CXXCOMPILE) $(1)
 cxxlink = @/bin/echo ' ' $(2) $@ && $(CXXLINK) $(1)
@@ -48,7 +50,7 @@ verbose_cmd = @$(x_verbose_cmd)
 endif
 
 .SUFFIXES:
-.SUFFIXES: .S .c .cc .o .s .ii
+.SUFFIXES: .S .c .cc .o .s .ii .bc
 
 .c.o:
 	$(call ccompile,-c $< -o $@,CC)
@@ -57,7 +59,7 @@ endif
 .S.o:
 	$(call ccompile,-c $< -o $@,ASM)
 .cc.o:
-	$(call cxxcompile,-c $< -o $@,CXX)
+	$(call cxxcompile,-c $< -o $@,CXX,-emit-llvm -c $< -o $(basename $@).bc)
 .cc.s:
 	$(call cxxcompile_nodep,-S $< -o $@,CXX -S)
 .cc.ii:
@@ -71,6 +73,7 @@ GENERIC_OBJS = string.o straccum.o nameinfo.o \
 	error.o timestamp.o glue.o task.o timer.o atomic.o fromfile.o gaprate.o \
 	element.o batchelement.o tcphelper.o flowelement.o flow.o \
 	allocator.o \
+	KaleidoscopeJIT.o \
 	confparse.o args.o variableenv.o lexer.o elemfilter.o routervisitor.o \
 	routerthread.o router.o master.o timerset.o selectset.o handlercall.o notifier.o \
 	integers.o md5.o crc32.o in_cksum.o iptable.o \
@@ -91,7 +94,8 @@ LLVM_LDFLAGS = $(shell llvm-config --ldflags) -lLLVMSupport
 
 CPPFLAGS = @CPPFLAGS@ -DCLICK_USERLEVEL
 CFLAGS = @CFLAGS@
-CXXFLAGS = @CXXFLAGS@ $(LLVM_CFLAGS)
+CXXFLAGS = @CXXFLAGS@ $(LLVM_CFLAGS) -Wno-macro-redefined -Wno-inconsistent-missing-override
+#CXXFLAGS = @CXXFLAGS@ $(LLVM_CFLAGS)
 
 DEFS = @DEFS@
 INCLUDES = -I$(top_builddir)/include -I$(top_builddir)/vendor -I$(top_srcdir)/include \
@@ -103,7 +107,8 @@ DL_LDFLAGS = @DL_LDFLAGS@
 
 CXXCOMPILE = $(CXX) $(DEFS) $(INCLUDES) $(CPPFLAGS) $(CXXFLAGS)
 CXXLD = $(CXX)
-CXXLINK = $(CXXLD) $(CXXFLAGS) $(LDFLAGS) -o $@
+CXXLINK = $(CXXLD) $(CXXFLAGS) $(LDFLAGS) -export-all-symbols -o $@
+#CXXLINK = $(CXXLD) $(CXXFLAGS) $(LDFLAGS) -o $@
 COMPILE = $(CC) $(DEFS) $(INCLUDES) $(CPPFLAGS) $(CFLAGS) $(LLVM_CFLAGS)
 CCLD = $(CC)
 LINK = $(CCLD) $(CFLAGS) $(LDFLAGS) $(LLVM_LIBS) $(LLVM_SYS_LIBS) $(LLVM_LDFLAGS) -o $@
@@ -210,7 +215,7 @@ uninstall:
 	for i in $(INSTALLPROGS); do rm -f $(DESTDIR)$(bindir)/$$i; done
 
 clean:
-	rm -f *.d *.o $(INSTALLPROGS) $(ELEMENTSCONF).mk $(ELEMENTSCONF).cc elements.conf elements.csmk libclick.a
+	rm -f *.d *.o *.bc $(INSTALLPROGS) $(ELEMENTSCONF).mk $(ELEMENTSCONF).cc elements.conf elements.csmk libclick.a
 ifeq ($(shell [ ${HAVE_FLOW_API} ] && echo true),true)
 	rm -rf test-pmd/ ../lib/librte_parse_* librte_parse.*
 endif

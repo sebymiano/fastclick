@@ -37,6 +37,10 @@ EtherSwitch::~EtherSwitch()
     _table.clear();
 }
 
+EtherSwitch* EtherSwitch::Create() {
+    return new EtherSwitch();
+}
+
 int
 EtherSwitch::configure(Vector<String> &conf, ErrorHandler *errh)
 {

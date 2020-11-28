@@ -58,6 +58,10 @@
 # include "../elements/ns/fromsimdevice.hh"
 #endif
 
+#include <llvm/IRReader/IRReader.h>
+#include <llvm/Support/SourceMgr.h>
+#include <llvm/Demangle/Demangle.h>
+
 CLICK_DECLS
 
 /** @file router.hh
@@ -72,6 +76,14 @@ const Handler* Handler::the_blank_handler;
 static Handler* globalh;
 static int nglobalh;
 static int globalh_cap;
+
+std::unique_ptr<morphy::KaleidoscopeJIT> Router::TheJIT;
+llvm::ExitOnError Router::ExitOnErr;
+std::unique_ptr<llvm::LLVMContext> Router::TheContext;
+std::unique_ptr<llvm::Module> Router::TheModule;
+std::unique_ptr<llvm::IRBuilder<>> Router::Builder;
+Element *Router::dynamic_elem;
+//std::function<void(Element *, int, Packet*)> Router::push_function;
 
 /** @brief  Create a router.
  *  @param  configuration  router configuration
@@ -97,6 +109,12 @@ Router::Router(const String &configuration, Master *master)
     _root_element = new ErrorElement;
     _root_element->attach_router(this, -1);
     master->register_router(this);
+
+    push_function = nullptr;
+    push_batch_function = nullptr;
+
+    _quit_thread = false;
+    //_jit_update_thread = std::thread(&Router::updateEtherSwitchCode, this);
 }
 
 /** @brief  Destroy the router.
@@ -139,6 +157,9 @@ Router::~Router()
 
     delete _root_element;
 
+    _quit_thread = false;
+    //_jit_update_thread.join();
+
 #if CLICK_LINUXMODULE
     // decrement module use counts
     for (struct module **m = _modules.begin(); m < _modules.end(); m++) {
@@ -160,6 +181,8 @@ Router::~Router()
     delete _name_info;
     if (_master)
         _master->unregister_router(this);
+
+    delete Router::dynamic_elem;
 }
 
 /** @brief  Decrement the router's reference count.
@@ -413,6 +436,11 @@ Router::add_element(Element *e, const String &ename, const String &conf,
 {
     if (_state != ROUTER_NEW || !e || e->router())
         return -1;
+
+    if (std::string(e->class_name()) == "EtherSwitch") {
+        e = Router::dynamic_elem;
+        click_chatter("Working with EtherSwitch class");
+    }
 
     _elements.push_back(e);
     _element_names.push_back(ename);
@@ -1485,6 +1513,49 @@ Router::initialize(ErrorHandler *errh)
 
         _runcount = 0;
         return -1;
+    }
+}
+
+void Router::updateEtherSwitchCode() {
+    // Now I want to get the address of the function used to push packets
+    auto Sym = ExitOnErr(TheJIT->lookup("_ZN11EtherSwitch4pushEiP6Packet"));
+
+    this->push_function = (void(*)(Element *, int, Packet*))(intptr_t)Sym.getAddress();
+    click_chatter("Got pointer to push function");
+
+    Sym = ExitOnErr(TheJIT->lookup("_ZN7Element10push_batchEiP11PacketBatch"));
+    this->push_batch_function = (void(*)(Element *, int, PacketBatch*))(intptr_t)Sym.getAddress();
+    click_chatter("Got pointer to push batch function");
+
+    while (!_quit_thread) {
+        sleep(30);
+
+        for (Connection *cp = _conn.begin(); cp != _conn.end(); ++cp) {
+            Element *frome = _elements[(*cp)[1].idx];
+            Element *toe = _elements[(*cp)[0].idx];
+
+            click_chatter("Connection from: %s, to %s", frome->class_name(), toe->class_name());
+            if (std::string(toe->class_name()) == "EtherSwitch") {
+                click_chatter("Updating push function pointer");
+                //frome->portPointer(true, (*cp)[1].port)->_e = Router::dynamic_elem;
+                frome->portPointer(true, (*cp)[1].port)->_bound.push = std::bind(this->push_function, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+                //frome->portPointer(true, (*cp)[1].port)->_bound.push = this->push_function;
+                # if HAVE_BATCH
+                click_chatter("Updating push batch function pointer");
+                frome->portPointer(true, (*cp)[1].port)->_bound_batch.push_batch = std::bind(this->push_batch_function, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+                //frome->portPointer(true, (*cp)[1].port)->_bound_batch.push_batch = this->push_batch_function;
+                # endif
+            }
+        }
+
+        // for (int i = 0; i < _elements.size(); i++) {
+        //     Element *e = _elements[_element_configure_order[i]];
+        //     //click_chatter("Scanning runtime elements: %s", element_ports_string(e).c_str());
+        //     if (std::string(e->class_name()) == "EtherSwitch") {
+        //         click_chatter("Updating function pointer");
+        //         e->portPointer(false, 0)->_bound.push = std::bind(this->push_function, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
+        //     }
+        // }
     }
 }
 
@@ -2702,6 +2773,59 @@ Router::router_write_handler(const String &s, Element *e, void *thunk, ErrorHand
 }
 
 void
+Router::staticInitializeMorphyJIT()
+{
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmParser();
+    llvm::InitializeNativeTargetAsmPrinter();
+
+    TheJIT = ExitOnErr(morphy::KaleidoscopeJIT::Create());
+
+    TheContext = std::make_unique<llvm::LLVMContext>();
+
+    llvm::SMDiagnostic err;
+
+    std::string path = "/home/smiano/dev/fastclick/userlevel/llvm-ele/etherswitch-original.bc";
+    //std::string path = "/home/smiano/dev/fastclick/userlevel/llvm-ele/etherswitch_opt_debug.bc";
+    TheModule = llvm::parseIRFile(path, err, *TheContext);
+
+    if (TheModule == nullptr) {
+        click_chatter("Error while parsing the module");
+    } else {
+        click_chatter("Module %s parsed successfully by the JIT", path.c_str());
+    }
+
+    TheModule->setDataLayout(TheJIT->getDataLayout());
+
+    auto RT = TheJIT->getMainJITDylib().createResourceTracker();
+    auto TSM = llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext));
+    ExitOnErr(TheJIT->addModule(std::move(TSM), RT));
+
+    //Get address of the constructor
+    auto Sym = ExitOnErr(TheJIT->lookup("_ZN11EtherSwitch6CreateEv"));
+    
+    auto *createEtherSwitch = (Element *(*)())(intptr_t)Sym.getAddress();
+
+    Router::dynamic_elem = createEtherSwitch();
+
+    // Element *dyn_ele = new functionPointer();
+
+    click_chatter("Name of the dynamically allocated object: %s", dynamic_elem->class_name());
+
+    // for (auto iter = TheModule->begin(); iter != TheModule->end(); iter++) {
+    //     if (iter->isDeclaration()) {
+    //         continue;
+    //     }
+
+    //     std::string demangled = llvm::demangle(iter->getName().str());
+    //     click_chatter("Before mangling: %s, after mangling: %s", iter->getName().str().c_str(), demangled.c_str());
+    // }
+
+    // Create a new builder for the module.
+    Builder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
+}
+
+void
 Router::static_initialize()
 {
     if (!nglobalh) {
@@ -2738,6 +2862,8 @@ Router::static_initialize()
         add_write_handler(0, "reset_cycles", router_write_handler, (void *)GH_RESET_CYCLES);
 #endif
     }
+
+    Router::staticInitializeMorphyJIT();
 }
 
 void

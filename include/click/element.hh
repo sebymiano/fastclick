@@ -150,6 +150,7 @@ class Element { public:
 
     class Port;
     inline const Port &port(bool isoutput, int port) const;
+    inline Port *portPointer(bool isoutput, int port);
     inline const Port &input(int port) const;
     inline const Port &output(int port) const;
 
@@ -289,17 +290,30 @@ class Element { public:
         #endif
 
 #if HAVE_BOUND_PORT_TRANSFER
-        union {
-            void (*push)(Element *e, int port, Packet *p);
-            Packet *(*pull)(Element *e, int port);
+        struct {
+            std::function<void(Element *, int, Packet *)> push;
+            std::function<Packet *(Element *, int port)> pull;
         } _bound;
-        union {
+        struct {
 #if HAVE_BATCH
-            void (*push_batch)(Element *e, int port, PacketBatch *p);
-            PacketBatch* (*pull_batch)(Element *e, int port, unsigned max);
+            std::function<void(Element *, int, PacketBatch *)> push_batch;
+            std::function<PacketBatch *(Element *, int port, unsigned max)> pull_batch;
 #endif
         } _bound_batch;
 #endif
+
+// #if HAVE_BOUND_PORT_TRANSFER
+//         union {
+//             void (*push)(Element *e, int port, Packet *p);
+//             Packet *(*pull)(Element *e, int port);
+//         } _bound;
+//         union {
+// #if HAVE_BATCH
+//             void (*push_batch)(Element *e, int port, PacketBatch *p);
+//             PacketBatch* (*pull_batch)(Element *e, int port, unsigned max);
+// #endif
+//         } _bound_batch;
+// #endif
 
 #if CLICK_STATS >= 1
         mutable unsigned _packets;      // How many packets have we moved?
@@ -313,6 +327,7 @@ class Element { public:
 
         friend class Element;
         friend class BatchElement;
+        friend class Router;
 
     };
 
@@ -513,6 +528,13 @@ Element::port(bool isoutput, int port) const
     return _ports[isoutput][port];
 }
 
+inline Element::Port*
+Element::portPointer(bool isoutput, int port)
+{
+    assert((unsigned) port < (unsigned) _nports[isoutput]);
+    return &_ports[isoutput][port];
+}
+
 /** @brief Return one of the element's input ports.
  * @param port port number
  *
@@ -604,14 +626,13 @@ Element::Port::Port()
 {
     PORT_ASSIGN(0);
 }
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpmf-conversions"
 
 inline void
 Element::Port::assign(bool isoutput, Element *e, int port)
 {
     _e = e;
     _port = port;
+
 #ifdef HAVE_AUTO_BATCH
     for (unsigned i = 0; i < current_batch.weight() ; i++)
         current_batch.set_value(i,0);
@@ -620,25 +641,55 @@ Element::Port::assign(bool isoutput, Element *e, int port)
 #if HAVE_BOUND_PORT_TRANSFER
     if (e) {
         if (isoutput) {
-            void (Element::*pusher)(int, Packet *) = &Element::push;
-            _bound.push = (void (*)(Element *, int, Packet *)) (e->*pusher);
+            _bound.push = std::bind(&Element::push, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
 # if HAVE_BATCH
-            void (Element::*pushbatcher)(int, PacketBatch *) = &Element::push_batch;
-            _bound_batch.push_batch = (void (*)(Element *, int, PacketBatch *)) (e->*pushbatcher);
+            _bound_batch.push_batch = std::bind(&Element::push_batch, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
 # endif
         } else {
-            Packet *(Element::*puller)(int) = &Element::pull;
-            _bound.pull = (Packet *(*)(Element *, int)) (e->*puller);
+            _bound.pull = std::bind(&Element::pull, std::placeholders::_1, std::placeholders::_2);
 # if HAVE_BATCH
-             PacketBatch *(Element::*pullbatcher)(int,unsigned) = &Element::pull_batch;
-             _bound_batch.pull_batch = (PacketBatch *(*)(Element *, int, unsigned)) (e->*pullbatcher);
+            _bound_batch.pull_batch = std::bind(&Element::pull_batch, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
 # endif
         }
     }
 #endif
 }
 
-#pragma GCC diagnostic pop
+// #pragma GCC diagnostic push
+// #pragma GCC diagnostic ignored "-Wpmf-conversions"
+
+// inline void
+// Element::Port::assign(bool isoutput, Element *e, int port)
+// {
+//     _e = e;
+//     _port = port;
+// #ifdef HAVE_AUTO_BATCH
+//     for (unsigned i = 0; i < current_batch.weight() ; i++)
+//         current_batch.set_value(i,0);
+// #endif
+//     (void) isoutput;
+// #if HAVE_BOUND_PORT_TRANSFER
+//     if (e) {
+//         if (isoutput) {
+//             void (Element::*pusher)(int, Packet *) = &Element::push;
+//             _bound.push = (void (*)(Element *, int, Packet *)) (e->*pusher);
+// # if HAVE_BATCH
+//             void (Element::*pushbatcher)(int, PacketBatch *) = &Element::push_batch;
+//             _bound_batch.push_batch = (void (*)(Element *, int, PacketBatch *)) (e->*pushbatcher);
+// # endif
+//         } else {
+//             Packet *(Element::*puller)(int) = &Element::pull;
+//             _bound.pull = (Packet *(*)(Element *, int)) (e->*puller);
+// # if HAVE_BATCH
+//              PacketBatch *(Element::*pullbatcher)(int,unsigned) = &Element::pull_batch;
+//              _bound_batch.pull_batch = (PacketBatch *(*)(Element *, int, unsigned)) (e->*pullbatcher);
+// # endif
+//         }
+//     }
+// #endif
+// }
+
+// #pragma GCC diagnostic pop
 
 inline void
 Element::Port::assign(bool isoutput, Element *owner, Element *e, int port)

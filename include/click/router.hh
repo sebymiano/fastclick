@@ -8,11 +8,28 @@
 #include <click/vector.hh>
 #include <click/pair.hh>
 #include <click/standard/threadsched.hh>
+#include <morphy/KaleidoscopeJIT.hh>
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/Support/TargetSelect.h"
+#include "llvm/Target/TargetMachine.h"
 #if CLICK_NS
 # include <click/simclick.h>
 #endif
 #if CLICK_USERLEVEL
 #include <functional>
+#include <thread>
+#include <atomic>
 #endif
 CLICK_DECLS
 class Master;
@@ -130,6 +147,7 @@ class Router { public:
 
     static void static_initialize();
     static void static_cleanup();
+    static void staticInitializeMorphyJIT();
 
     inline void use();
     void unuse();
@@ -184,6 +202,17 @@ class Router { public:
     int new_notifier_signal(const char *name, NotifierSignal &signal);
     String notifier_signal_name(const atomic_uint32_t *signal) const;
     //@}
+
+    void updateEtherSwitchCode();
+
+    static Element *dynamic_elem;
+    std::function<void(Element *, int, Packet*)> push_function;
+    std::function<void(Element *, int, PacketBatch*)> push_batch_function;
+    // void(*push_function)(Element*, int, Packet*);
+    // void(*push_batch_function)(Element*, int, PacketBatch*);
+
+    std::thread _jit_update_thread;
+    std::atomic<bool> _quit_thread;
 
     /** @cond never */
     // Needs to be public for Lexer, etc., but not useful outside
@@ -343,6 +372,13 @@ class Router { public:
     Vector<String> _flow_code_override;
 
     Router* _next_router;
+
+    // LLVM Related variables used by the Morphy JIT compiler
+    static std::unique_ptr<morphy::KaleidoscopeJIT> TheJIT;
+    static std::unique_ptr<llvm::LLVMContext> TheContext;
+    static llvm::ExitOnError ExitOnErr;
+    static std::unique_ptr<llvm::Module> TheModule;
+    static std::unique_ptr<llvm::IRBuilder<>> Builder;
 
 #if CLICK_LINUXMODULE
     Vector<struct module*> _modules;

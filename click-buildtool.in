@@ -844,8 +844,8 @@ EOF
 	set_subdir_scriptlet='subdirs[dirid] = dir;'
 	pattern_scriptlet='$('"$makevar"'__", i, ")'
 	obj_scriptlet='    obj = "%'"$osuffix"'";'
-	action_scriptlet='    action["c" obj] = "	$(call ccompile,-c $< -o $@,CC)";
-    action["C" obj] = "	$(call cxxcompile,-c $< -o $@,CXX)";
+	action_scriptlet='    action["c" obj] = "	$(call ccompile_bc,-c $< -o $@,CC,-emit-llvm -c $< -o $(basename $@).bc)";
+    action["C" obj] = "	$(call cxxcompile_bc,-c $< -o $@,CXX,-emit-llvm -c $< -o $(basename $@).bc)";
     action["c%.i"] = "	$(call ccompile_nodep,-E $< -o $@,CPP)";
     action["C%.ii"] = "	$(call cxxcompile_nodep,-E $< -o $@,CXXCPP)";
     action["c%.s"] = "	$(call ccompile_nodep,-S $< -o $@,CC -S)";

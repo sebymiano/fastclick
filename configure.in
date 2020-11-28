@@ -907,7 +907,7 @@ AC_ARG_ENABLE(bound-port-transfer,
 
 if test "$enable_bound_port_transfer" = yes; then
   AC_DEFINE([HAVE_BOUND_PORT_TRANSFER], [1], [Define if Port::push/Port::pull should use bound function pointers.])
-  CXXFLAGS="$CXXFLAGS -Wno-pmf-conversions"
+  CXXFLAGS="$CXXFLAGS -fvisibility=default"
 fi
 
 AX_CHECK_COMPILE_FLAG([-faligned-new], [have_aligned_new=yes], [have_aligned_new=no])

@@ -66,6 +66,8 @@ class EtherSwitch : public Element { public:
   EtherSwitch() CLICK_COLD;
   ~EtherSwitch() CLICK_COLD;
 
+  static EtherSwitch* Create();
+
   const char *class_name() const override		{ return "EtherSwitch"; }
   const char *port_count() const override		{ return "2-/="; }
   const char *processing() const override		{ return PUSH; }
